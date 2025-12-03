@@ -728,7 +728,7 @@ impl Device {
         self.udp6 = Some(udp6.clone());
 
         // Process packet in a seperate thread
-        for _ in 0..4 {
+        for _ in 0..num_cpus::get_physical() {
             let rx_clone = self.tunnel_to_socket_rx.clone();
             let close_chan_clone = self.close_network_worker_rx.clone();
             let udp4_c = udp4.clone();
