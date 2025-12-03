@@ -63,7 +63,7 @@ const MAX_PKT_SIZE: usize = 1550;
 const MAX_ITR: usize = 100;
 const CHANNEL_SIZE: usize = 500;
 const WG_HEADER_OFFSET: usize = 16;
-
+compilation test
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("i/o error: {0}")]
@@ -180,6 +180,8 @@ pub struct Device {
 
     tunnel_to_socket_rx: Receiver<NetworkTaskData>,
     tunnel_to_socket_tx: Sender<NetworkTaskData>,
+
+    writer_queue: dispatch::Queue,
 
     // UDP socket -> processing -> socket_to_tunnel_tx ->
     // [thread boundary] -> socket_to_tunnel_rx -> -> write to tunnel
@@ -621,6 +623,7 @@ impl Device {
         let (close_network_worker_tx, close_network_worker_rx) =
             crossbeam_channel::bounded(num_cpus::get_physical());
 
+        let queue = dispatch::Queue::global(dispatch::QueuePriority::High);
         let mut device = Device {
             queue: Arc::new(poll),
             iface,
@@ -644,6 +647,7 @@ impl Device {
             tunnel_to_socket_rx,
             close_network_worker_tx,
             close_network_worker_rx,
+            writer_queue: queue,
             socket_to_tunnel_tx,
             socket_to_tunnel_rx,
             update_seq: 0,
@@ -741,7 +745,7 @@ impl Device {
 
         let rx_clone = self.socket_to_tunnel_rx.clone();
         let fw_callback = self.config.firewall_process_inbound_callback.clone();
-        thread::spawn(move || write_to_tun_worker(rx_clone, fw_callback));
+        self.writer_queue.exec_async (move || write_to_tun_worker(rx_clone, fw_callback));
 
         self.listen_port = port;
 
