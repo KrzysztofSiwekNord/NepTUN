@@ -728,7 +728,7 @@ impl Device {
         self.udp6 = Some(udp6.clone());
 
         // Process packet in a seperate thread
-        for _ in 0..num_cpus::get_physical() {
+        for _ in 0..4 {
             let rx_clone = self.tunnel_to_socket_rx.clone();
             let close_chan_clone = self.close_network_worker_rx.clone();
             let udp4_c = udp4.clone();
@@ -738,7 +738,7 @@ impl Device {
             } else {
                 None
             };
-            thread::spawn(move || {
+            self.writer_queue.exec_async(move || {
                 write_to_socket_worker(rx_clone, close_chan_clone, udp4_c, udp6_c, fw_callback)
             });
         }
