@@ -127,10 +127,7 @@ impl MakeExternalNeptun for MakeExternalNeptunNoop {
 
 pub struct DeviceHandle {
     pub device: Arc<Lock<Device>>, // The interface this handle owns
-    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "tvos")))]
     threads: Vec<thread::JoinHandle<()>>,
-    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
-    threads: (dispatch::Group, Vec<dispatch::Queue>),
     sockets_to_close: Arc<Lock<Vec<Arc<TunSocket>>>>,
 }
 
@@ -214,16 +211,7 @@ struct TunnelWorkerData {
     buf_len: usize,
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "tvos")))]
 type EventLoopThreads = Result<(Vec<JoinHandle<()>>, Arc<Lock<Vec<Arc<TunSocket>>>>), Error>;
-#[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
-type EventLoopThreads = Result<
-    (
-        (dispatch::Group, Vec<dispatch::Queue>),
-        Arc<Lock<Vec<Arc<TunSocket>>>>,
-    ),
-    Error,
->;
 
 impl DeviceHandle {
     pub fn new(name: &str, config: DeviceConfig) -> Result<DeviceHandle, Error> {
@@ -253,30 +241,6 @@ impl DeviceHandle {
         interface_lock: Arc<Lock<Device>>,
     ) -> EventLoopThreads {
         let sockets_to_close = Arc::new(Lock::new(vec![]));
-        #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
-        let threads = {
-            let group = dispatch::Group::create();
-            let mut queues = vec![];
-            for i in 0..n_threads {
-                queues.push({
-                    let dev = Arc::clone(&interface_lock);
-                    let thread_local = DeviceHandle::new_thread_local(i, &dev.read());
-                    sockets_to_close
-                        .read()
-                        .try_writeable(|_| {}, |fds| fds.push(thread_local.iface.clone()));
-                    let group_clone = group.clone();
-                    let queue = dispatch::Queue::global(dispatch::QueuePriority::High);
-                    queue.exec_async(move || {
-                        group_clone.enter();
-                        DeviceHandle::event_loop(thread_local, &dev)
-                    });
-                    queue
-                });
-            }
-            (group, queues)
-        };
-
-        #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "tvos")))]
         let threads = {
             let mut threads = vec![];
             for i in 0..n_threads {
@@ -315,18 +279,12 @@ impl DeviceHandle {
         self.device.read().drop_connected_sockets();
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "tvos")))]
     pub fn wait(&mut self) {
         while let Some(thread) = self.threads.pop() {
             if let Err(e) = thread.join() {
                 tracing::error!("Unable to gracefully close thread. {:?}", e);
             }
         }
-    }
-
-    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
-    pub fn wait(&mut self) {
-        self.threads.0.wait();
     }
 
     pub fn clean(&mut self) {
@@ -341,10 +299,7 @@ impl DeviceHandle {
         // The event loop must be stopped so that the old iface event handler can be safelly cleared.
         // See clear_event_by_fd() function description
         let mut threads = vec![];
-        #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "tvos")))]
         swap(&mut threads, &mut self.threads);
-        #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
-        swap(&mut threads, &mut self.threads.1);
         self.device
             .read()
             .try_writeable(
