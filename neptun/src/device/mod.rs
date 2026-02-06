@@ -54,7 +54,7 @@ use tun::TunSocket;
 
 use dev_lock::{Lock, LockReadGuard};
 use thiserror::Error;
-
+use thread_priority::*;
 const HANDSHAKE_RATE_LIMIT: u64 = 100; // The number of handshakes per second we can tolerate before using cookies
 
 // Max packet size of 1550 because packets are limited by the MTU sizes
@@ -268,6 +268,9 @@ impl DeviceHandle {
                     let queue = dispatch::Queue::global(dispatch::QueuePriority::High);
                     queue.exec_async(move || {
                         group_clone.enter();
+                        println!("Setting the priority to the highest possible");
+                        let result = set_current_thread_priority(ThreadPriority::Max).is_ok();
+                        println!("KSIWEK Results with {result}");
                         DeviceHandle::event_loop(thread_local, &dev)
                     });
                     queue
@@ -288,7 +291,13 @@ impl DeviceHandle {
                         .try_writeable(|_| {}, |fds| fds.push(thread_local.iface.clone()));
                     thread::Builder::new()
                         .name(format!("neptun"))
-                        .spawn(move || DeviceHandle::event_loop(thread_local, &dev))?
+                        .spawn(move || {
+                            println!("Setting the priority to the highest possible");
+                            let result = set_current_thread_priority(ThreadPriority::Max).is_ok();
+                            println!("KSIWEK Results with {result}");
+
+                            DeviceHandle::event_loop(thread_local, &dev)
+                        })?
                 });
             }
             threads
@@ -761,13 +770,23 @@ impl Device {
                 None
             };
             thread::spawn(move || {
+                println!("Setting the priority to the highest possible");
+                let result = set_current_thread_priority(ThreadPriority::Max).is_ok();
+                println!("KSIWEK Results with {result}");
+
                 write_to_socket_worker(rx_clone, close_chan_clone, udp4_c, udp6_c, fw_callback)
             });
         }
 
         let rx_clone = self.socket_to_tunnel_rx.clone();
         let fw_callback = self.config.firewall_process_inbound_callback.clone();
-        thread::spawn(move || write_to_tun_worker(rx_clone, close_tun_worker_rx, fw_callback));
+        thread::spawn(move || {
+            println!("Setting the priority to the highest possible");
+            let result = set_current_thread_priority(ThreadPriority::Max).is_ok();
+            println!("KSIWEK Results with {result}");
+
+            write_to_tun_worker(rx_clone, close_tun_worker_rx, fw_callback)
+        });
 
         self.listen_port = port;
 
